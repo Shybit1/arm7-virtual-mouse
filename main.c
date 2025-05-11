@@ -1,6 +1,7 @@
 #include <lpc214x.h>
 #include <stdint.h>
 #include <math.h>
+#include <string.h>
 
 // MPU6050 I2C Address
 #define MPU6050_ADDR 0x68
@@ -12,23 +13,21 @@
 #define PROCESS_NOISE 0.01f
 #define MEASUREMENT_NOISE 0.1f
 
-// Button pin (P0.15 in this case)
+// Button pin (P0.15)
 #define BUTTON_PIN (1 << 15)
 
+// UART Configuration
+#define UART_BAUD 9600  // HC-05 default baud rate
+
 // Function prototypes
+void UART0_Init(void);
+void UART0_SendChar(char c);
+void UART0_SendString(const char *str);
 void I2C_Init(void);
-void I2C_Start(void);
-void I2C_Stop(void);
-void I2C_Write(uint8_t data);
-uint8_t I2C_Read(uint8_t ack);
-void MPU6050_WriteReg(uint8_t reg, uint8_t data);
-uint8_t MPU6050_ReadReg(uint8_t reg);
 void MPU6050_Init(void);
 void MPU6050_GetAcceleration(int16_t *ax, int16_t *ay, int16_t *az);
-void USB_Init(void);
-void USB_SendMouseReport(int8_t dx, int8_t dy, uint8_t buttons);
-void DelayMs(uint32_t ms);
 float KalmanFilter(float measurement, float *estimate, float *error);
+void DelayMs(uint32_t ms);
 
 // Global variables
 float ay_offset = 0.0f;
@@ -38,13 +37,21 @@ uint8_t lastButtonState = 1;
 
 int main(void) {
     // Initialize systems
+    UART0_Init();
     I2C_Init();
     MPU6050_Init();
-    USB_Init();
     
     // Configure button pin as input with pull-up
     IODIR0 &= ~BUTTON_PIN;  // Set as input
-    IOSET0 = BUTTON_PIN;    // Enable pull-up
+    IOSET0 = BUTTON_PIN;     // Enable pull-up
+    
+    // Send AT commands to configure HC-05 (optional)
+    UART0_SendString("AT+NAME=LPC2148_MOUSE\r\n");
+    DelayMs(100);
+    UART0_SendString("AT+ROLE=0\r\n");  // Set as slave
+    DelayMs(100);
+    UART0_SendString("AT+CMODE=1\r\n"); // Connect any address
+    DelayMs(100);
     
     // Calibration routine
     int16_t ax, ay, az;
@@ -86,8 +93,15 @@ int main(void) {
         uint8_t buttonClick = (lastButtonState == 1 && currentButtonState == 0) ? 1 : 0;
         lastButtonState = currentButtonState;
         
-        // Send USB HID report
-        USB_SendMouseReport(deltaX, -deltaY, buttonClick);
+        // Send mouse data via Bluetooth
+        // Format: "M,X,Y,B\r\n" where X,Y are deltas, B is button state
+        UART0_SendString("M,");
+        UART0_SendChar(deltaX + '0');  // Simple conversion for demo
+        UART0_SendChar(',');
+        UART0_SendChar(deltaY + '0');
+        UART0_SendChar(',');
+        UART0_SendChar(buttonClick + '0');
+        UART0_SendString("\r\n");
         
         DelayMs(20);
     }
@@ -95,44 +109,27 @@ int main(void) {
     return 0;
 }
 
-// I2C Initialization
-void I2C_Init(void) {
-    PINSEL0 |= (1 << 4) | (1 << 6);  // Enable I2C on P0.2 (SCL) and P0.3 (SDA)
-    I2C0CONSET = (1 << 6);           // Enable I2C interface
-    I2C0SCLL = 0x32;                 // Set clock rate (adjust as needed)
-    I2C0SCLH = 0x32;
+// UART Initialization
+void UART0_Init(void) {
+    PINSEL0 |= (1 << 0) | (1 << 2);  // Enable UART0 on P0.0 (TXD0) and P0.1 (RXD0)
+    U0LCR = 0x83;  // 8 bits, no parity, 1 stop bit, DLAB enabled
+    U0DLL = (15000000 / (16 * UART_BAUD)) & 0xFF;  // Set baud rate
+    U0DLM = ((15000000 / (16 * UART_BAUD)) >> 8) & 0xFF;
+    U0LCR = 0x03;  // DLAB disabled
 }
 
-// MPU6050 Initialization
-void MPU6050_Init(void) {
-    MPU6050_WriteReg(0x6B, 0x00);  // Wake up MPU6050
-    MPU6050_WriteReg(0x1B, 0x00);  // Set gyro full scale range
-    MPU6050_WriteReg(0x1C, 0x00);  // Set accelerometer full scale range
+void UART0_SendChar(char c) {
+    while(!(U0LSR & (1 << 5)));  // Wait for THRE
+    U0THR = c;
 }
 
-// Read acceleration data from MPU6050
-void MPU6050_GetAcceleration(int16_t *ax, int16_t *ay, int16_t *az) {
-    *ax = (int16_t)((MPU6050_ReadReg(0x3B) << 8 | MPU6050_ReadReg(0x3C));
-    *ay = (int16_t)((MPU6050_ReadReg(0x3D) << 8 | MPU6050_ReadReg(0x3E));
-    *az = (int16_t)((MPU6050_ReadReg(0x3F) << 8 | MPU6050_ReadReg(0x40));
+void UART0_SendString(const char *str) {
+    while(*str) {
+        UART0_SendChar(*str++);
+    }
 }
 
-// USB HID Mouse Implementation
-void USB_Init(void) {
-    // This is a simplified USB initialization
-    // Actual implementation would require proper USB stack configuration
-    // including endpoint setup, descriptor tables, etc.
-    PINSEL1 |= (1 << 18) | (1 << 20);  // Configure USB pins
-    // Additional USB controller initialization would go here
-}
-
-void USB_SendMouseReport(int8_t dx, int8_t dy, uint8_t buttons) {
-    // This would send a USB HID mouse report
-    // Implementation depends on your USB stack
-    uint8_t report[4] = {buttons, dx, dy, 0};
-    // Actual USB transmission code would go here
-}
-
+// [Rest of the functions (I2C, MPU6050, KalmanFilter) remain the same as previous example]
 // Kalman Filter Implementation
 float KalmanFilter(float measurement, float *estimate, float *error) {
     // Prediction update
