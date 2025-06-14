@@ -1,1 +1,1 @@
-# arm7-virtual-mouse
+# accelerometer-based-virtual-mouse
