@@ -1,3 +1,4 @@
+//This is the C code for LPC2148 microcontroller to read MPU6050 data and send mouse movements on COM5 (via Bluetooth (HC-05) OR Serial Port)
 #include <lpc214x.h>
 #include <stdint.h>
 #include <math.h>
