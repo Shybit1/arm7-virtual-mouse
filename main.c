@@ -128,8 +128,6 @@ void UART0_SendString(const char *str) {
         UART0_SendChar(*str++);
     }
 }
-
-// [Rest of the functions (I2C, MPU6050, KalmanFilter) remain the same as previous example]
 // Kalman Filter Implementation
 float KalmanFilter(float measurement, float *estimate, float *error) {
     // Prediction update
